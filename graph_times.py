@@ -40,9 +40,11 @@ def is_ground_node(node):
 
 def main():
     # Build the graph
+    print("Building Graph")
     graph = build_graph()
 
     # Get all unique nodes
+    print("Idenifying Start points")
     nodes = set()
     for node in graph:
         nodes.add(node)
@@ -54,6 +56,7 @@ def main():
         for start in nodes:
             if not is_ground_node(start):
                 continue
+            print(f"Running dijkstra for {start}")
             distances = dijkstra(graph, start)
             for end in nodes:
                 if distances[end] != float('inf') and start != end and is_ground_node(end):
