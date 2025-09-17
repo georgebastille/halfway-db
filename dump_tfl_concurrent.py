@@ -1,12 +1,12 @@
+import concurrent.futures
 import os
 import sys
-from typing import Final, NamedTuple
-from requests.adapters import HTTPAdapter, Retry
-import concurrent.futures
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter, Retry
 from tqdm import tqdm
+from typing import Final, NamedTuple
 
 
 class GraphEdge(NamedTuple):
@@ -232,7 +232,9 @@ class TflAPI:
 
         return times
 
-    def _edge_time(self, edge: tuple[tuple[str,str], tuple[str, str]]) -> tuple[str, str, str, str, int]:
+    def _edge_time(
+        self, edge: tuple[tuple[str, str], tuple[str, str]]
+    ) -> tuple[str, str, str, str, int]:
         from_node = edge[0]
         to_node = edge[1]
         if from_node[1] == "GROUND" or to_node[1] == "GROUND":
@@ -241,13 +243,15 @@ class TflAPI:
             return (*from_node, *to_node, 2)
         return (*from_node, *to_node, self.get_travel_time(from_node[0], to_node[0]))
 
-    def edge_processor( self, edges) -> list[tuple[str, str, str, str, int]]:
+    def edge_processor(self, edges) -> list[tuple[str, str, str, str, int]]:
         timed_edges = []
         # We can use a with statement to ensure threads are cleaned up promptly
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             # Start the load operations and mark each future with its URL
             future_to_edge = {executor.submit(self._edge_time, edge) for edge in edges}
-            for future in tqdm(concurrent.futures.as_completed(future_to_edge), total=len(edges)):
+            for future in tqdm(
+                concurrent.futures.as_completed(future_to_edge), total=len(edges)
+            ):
                 timed_edges.append(future.result())
         return timed_edges
 

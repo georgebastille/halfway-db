@@ -1,0 +1,17 @@
+# ruff.toml
+
+# Target Python version
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "I"]  # I = isort import sorting
+
+
+# Enable Ruff's built-in formatter
+[format]
+# Match Black defaults unless you want to tweak
+quote-style = "double"       # or "single"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+
