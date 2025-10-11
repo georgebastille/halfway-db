@@ -1,0 +1,6 @@
+*.db
+*.jsonl
+.ipynb_checkpoints
+national_data/CORPUSExtract.json
+national_data/Stops.csv 
+national_data/StopsHead.csv
