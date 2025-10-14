@@ -180,13 +180,29 @@ def load_stop_points(path: Path | str) -> Dict[str, StopPoint]:
                 by_tiploc[tiploc] = candidate
                 continue
 
-            # Prefer "RLY" records; otherwise retain the first with coordinates.
-            if existing.stop_type == "RLY":
-                continue
-            if candidate.stop_type == "RLY":
+            existing_is_rly = existing.stop_type == "RLY"
+            candidate_is_rly = candidate.stop_type == "RLY"
+            existing_has_coords = (
+                existing.latitude is not None and existing.longitude is not None
+            )
+            candidate_has_coords = (
+                candidate.latitude is not None and candidate.longitude is not None
+            )
+
+            # Always upgrade to a record that supplies coordinates if the current
+            # selection does not have them (several NaPTAN rail hubs omit lat/lon).
+            if not existing_has_coords and candidate_has_coords:
                 by_tiploc[tiploc] = candidate
                 continue
-            if existing.latitude is None and candidate.latitude is not None:
+
+            # Prefer rail ("RLY") stop points when they improve on the existing
+            # record. This avoids discarding a coordinated entry in favour of an
+            # un-coordinated rail placeholder.
+            if (
+                candidate_is_rly
+                and not existing_is_rly
+                and (candidate_has_coords or not existing_has_coords)
+            ):
                 by_tiploc[tiploc] = candidate
                 continue
 

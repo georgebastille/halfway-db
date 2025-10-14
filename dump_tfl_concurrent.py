@@ -21,6 +21,8 @@ class Station(NamedTuple):
     line_id: str
     hub_id: str
     hub_name: str | None
+    latitude: float | None
+    longitude: float | None
 
 
 class StationTimeInterval(NamedTuple):
@@ -90,8 +92,10 @@ class TflAPI:
             line_stations.append(station_variation)
         return line_stations
 
-    def get_stop_points(self, stop_point_ids: list[str]) -> list[tuple[str, str]]:
-        stops: list[tuple[str, str]] = []
+    def get_stop_points(
+        self, stop_point_ids: list[str]
+    ) -> list[tuple[str, str | None, float | None, float | None]]:
+        stops: list[tuple[str, str | None, float | None, float | None]] = []
 
         def batchify(iterable, n=10):
             l = len(iterable)
@@ -99,13 +103,27 @@ class TflAPI:
                 yield iterable[ndx : min(ndx + n, l)]
 
         for batch in batchify(stop_point_ids):
+            requested_ids = set(batch)
             tfl_stops = self._fetch_tfl_data(f"/StopPoint/{','.join(batch)}")
             if tfl_stops is None:
                 print(f"ERROR: Retrieved No Stop Points for {stop_point_ids}")
                 continue
 
+            if isinstance(tfl_stops, dict):
+                tfl_stops = [tfl_stops]
+
             for stop in tfl_stops:
-                stops.append((stop["hubNaptanCode"], stop["commonName"]))
+                stop_id = stop.get("id")
+                if stop_id not in requested_ids:
+                    continue
+                stops.append(
+                    (
+                        stop_id,
+                        stop.get("commonName"),
+                        stop.get("lat"),
+                        stop.get("lon"),
+                    )
+                )
         return stops
 
     def get_stations(self, line_id: str) -> dict[str, Station]:
@@ -134,6 +152,8 @@ class TflAPI:
                 line_id=line_id,
                 hub_id=hub_id,
                 hub_name=hub_name,
+                latitude=station.get("lat"),
+                longitude=station.get("lon"),
             )
 
         return stations_d
@@ -276,9 +296,8 @@ if __name__ == "__main__":
     line_id_2_name = tfl.get_lines(DESIRED_MODES)
 
     edges: set[tuple[tuple[str, str], tuple[str, str]]] = set()
-    hubs: list[dict[str, str]] = []
+    hub_records: dict[str, dict[str, object]] = {}
     unnamed_hubs: set[str] = set()
-    grounds: list[dict[str, str]] = []
 
     for line_id in line_id_2_name.keys():
         print(f"Fetching Stations on the {line_id} line")
@@ -289,10 +308,27 @@ if __name__ == "__main__":
             hub_node = (station.hub_id, "HUB")
             edges.add((station_node, hub_node))
             edges.add((hub_node, station_node))
+
+            hub_record = hub_records.setdefault(
+                station.hub_id,
+                {
+                    "station_id": station.hub_id,
+                    "station_name": station.hub_name or station.station_name,
+                    "latitude": station.latitude,
+                    "longitude": station.longitude,
+                },
+            )
+
+            if station.hub_name:
+                hub_record["station_name"] = station.hub_name
+
+            if station.latitude is not None and hub_record.get("latitude") is None:
+                hub_record["latitude"] = station.latitude
+            if station.longitude is not None and hub_record.get("longitude") is None:
+                hub_record["longitude"] = station.longitude
+
             if not station.hub_name:
                 unnamed_hubs.add(station.hub_id)
-            else:
-                hubs.append({"hub_id": station.hub_id, "hub_name": station.hub_name})
 
         for direction in ["inbound", "outbound"]:
             ordered_stations = tfl.get_ordered_stations(line_id, direction)
@@ -302,15 +338,40 @@ if __name__ == "__main__":
                 ):
                     edges.add(((from_station, line_id), (to_station, line_id)))
 
-    for hub_id, hub_name in tfl.get_stop_points(list(unnamed_hubs)):
-        hubs.append({"hub_id": hub_id, "hub_name": hub_name})
+    if unnamed_hubs:
+        for hub_id, hub_name, latitude, longitude in tfl.get_stop_points(
+            list(unnamed_hubs)
+        ):
+            hub_record = hub_records.setdefault(
+                hub_id,
+                {
+                    "station_id": hub_id,
+                    "station_name": hub_name or hub_id,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                },
+            )
+            if hub_name:
+                hub_record["station_name"] = hub_name
+            if latitude is not None:
+                hub_record["latitude"] = latitude
+            if longitude is not None:
+                hub_record["longitude"] = longitude
 
-    for hub in hubs:
-        hub_id = hub["hub_id"]
-        hub_name = hub["hub_name"]
+    grounds: list[dict[str, object]] = []
+    for hub_id in sorted(hub_records.keys()):
+        hub = hub_records[hub_id]
+        hub_name = hub.get("station_name") or hub_id
         edges.add(((hub_id, "HUB"), (hub_id, "GROUND")))
         edges.add(((hub_id, "GROUND"), (hub_id, "HUB")))
-        grounds.append({"station_name": hub_name, "station_id": hub_id})
+        grounds.append(
+            {
+                "station_name": hub_name,
+                "station_id": hub_id,
+                "latitude": hub.get("latitude"),
+                "longitude": hub.get("longitude"),
+            }
+        )
 
     print("Fetching all station -> station times")
     timed_edges = tfl.edge_processor(edges)

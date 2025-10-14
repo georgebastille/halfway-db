@@ -87,7 +87,21 @@ def merge_station_metadata(existing: Dict[str, dict], national_stations) -> None
     """
     for station_id, meta in national_stations.items():
         record = existing.get(station_id, {"station_id": station_id})
-        record["station_name"] = meta.name or record.get("station_name") or station_id
+
+        preferred_name = meta.name or record.get("station_name") or station_id
+        locality_name = (meta.locality_name or "").strip() or None
+        if (
+            locality_name
+            and meta.three_alpha is None
+            and locality_name.casefold() not in preferred_name.casefold()
+        ):
+            # When CORPUS only provides a generic platform label (e.g. "CENTRAL"),
+            # fall back to the locality name so the resulting records read as the
+            # human station name. `ensure_unique_station_names` will add line
+            # identifiers when multiple records share the same locality.
+            preferred_name = locality_name
+
+        record["station_name"] = preferred_name
         record["code"] = meta.three_alpha or record.get("code") or meta.tiploc
         record["latitude"] = meta.latitude
         record["longitude"] = meta.longitude
