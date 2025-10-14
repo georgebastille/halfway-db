@@ -2,16 +2,16 @@ import json
 from collections import defaultdict
 from heapq import heappush, heappop
 
-def build_graph():
-    graph = defaultdict(lambda: defaultdict(lambda: float('inf')))
 
-    # Read times.jsonl
-    with open('./lines.jsonl', 'r') as f:
+def build_graph():
+    graph = defaultdict(lambda: defaultdict(lambda: float("inf")))
+
+    with open("./lines.jsonl", "r") as f:
         for line in f:
             data = json.loads(line)
-            key1 = (data['from_id'], data['from_line'])
-            key2 = (data['to_id'], data['to_line'])
-            graph[key1][key2] = data['time']
+            key1 = (data["from_id"], data["from_line"])
+            key2 = (data["to_id"], data["to_line"])
+            graph[key1][key2] = data["time"]
 
     return graph
 
@@ -39,7 +39,6 @@ def is_ground_node(node):
     return node[1] == "GROUND"
 
 def main():
-    # Build the graph
     print("Building Graph")
     graph = build_graph()
 
