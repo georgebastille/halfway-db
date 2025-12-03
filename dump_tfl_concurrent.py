@@ -1,12 +1,12 @@
 import concurrent.futures
 import os
 import sys
+from typing import Final, Iterable, NamedTuple
 
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter, Retry
 from tqdm import tqdm
-from typing import Final, NamedTuple
 
 
 class GraphEdge(NamedTuple):
@@ -266,7 +266,7 @@ class TflAPI:
     def edge_processor(self, edges) -> list[tuple[str, str, str, str, int]]:
         timed_edges = []
         # We can use a with statement to ensure threads are cleaned up promptly
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
             # Start the load operations and mark each future with its URL
             future_to_edge = {executor.submit(self._edge_time, edge) for edge in edges}
             for future in tqdm(
@@ -274,6 +274,26 @@ class TflAPI:
             ):
                 timed_edges.append(future.result())
         return timed_edges
+
+
+def hydrate_stop_point_metadata(
+    tfl: TflAPI, records: dict[str, dict[str, object]], stop_point_ids: Iterable[str]
+) -> None:
+    """Fill in display names and coordinates for the supplied stop points."""
+    ids = list(stop_point_ids)
+    if not ids:
+        return
+
+    for stop_id, stop_name, latitude, longitude in tfl.get_stop_points(ids):
+        record = records.get(stop_id)
+        if record is None:
+            continue
+        if stop_name:
+            record["station_name"] = stop_name
+        if latitude is not None:
+            record["latitude"] = latitude
+        if longitude is not None:
+            record["longitude"] = longitude
 
 
 DESIRED_MODES: Final = ["dlr", "elizabeth-line", "overground", "tube", "tram"]
@@ -297,7 +317,7 @@ if __name__ == "__main__":
 
     edges: set[tuple[tuple[str, str], tuple[str, str]]] = set()
     hub_records: dict[str, dict[str, object]] = {}
-    unnamed_hubs: set[str] = set()
+    station_records: dict[str, dict[str, object]] = {}
 
     for line_id in line_id_2_name.keys():
         print(f"Fetching Stations on the {line_id} line")
@@ -308,6 +328,23 @@ if __name__ == "__main__":
             hub_node = (station.hub_id, "HUB")
             edges.add((station_node, hub_node))
             edges.add((hub_node, station_node))
+
+            if station.station_id != station.hub_id:
+                station_record = station_records.setdefault(
+                    station.station_id,
+                    {
+                        "station_id": station.station_id,
+                        "station_name": station.station_name,
+                        "latitude": station.latitude,
+                        "longitude": station.longitude,
+                    },
+                )
+                if station_record.get("station_name") is None:
+                    station_record["station_name"] = station.station_name
+                if station.latitude is not None:
+                    station_record["latitude"] = station.latitude
+                if station.longitude is not None:
+                    station_record["longitude"] = station.longitude
 
             hub_record = hub_records.setdefault(
                 station.hub_id,
@@ -327,9 +364,6 @@ if __name__ == "__main__":
             if station.longitude is not None and hub_record.get("longitude") is None:
                 hub_record["longitude"] = station.longitude
 
-            if not station.hub_name:
-                unnamed_hubs.add(station.hub_id)
-
         for direction in ["inbound", "outbound"]:
             ordered_stations = tfl.get_ordered_stations(line_id, direction)
             for ordered_station in ordered_stations:
@@ -338,38 +372,39 @@ if __name__ == "__main__":
                 ):
                     edges.add(((from_station, line_id), (to_station, line_id)))
 
-    if unnamed_hubs:
-        for hub_id, hub_name, latitude, longitude in tfl.get_stop_points(
-            list(unnamed_hubs)
-        ):
-            hub_record = hub_records.setdefault(
-                hub_id,
-                {
-                    "station_id": hub_id,
-                    "station_name": hub_name or hub_id,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                },
-            )
-            if hub_name:
-                hub_record["station_name"] = hub_name
-            if latitude is not None:
-                hub_record["latitude"] = latitude
-            if longitude is not None:
-                hub_record["longitude"] = longitude
+    stations_missing_coords = [
+        station_id
+        for station_id, record in station_records.items()
+        if record.get("latitude") is None or record.get("longitude") is None
+    ]
+    hydrate_stop_point_metadata(tfl, station_records, stations_missing_coords)
+    hydrate_stop_point_metadata(tfl, hub_records, list(hub_records.keys()))
 
-    grounds: list[dict[str, object]] = []
+    station_rows: list[dict[str, object]] = []
+    for station_id in sorted(station_records.keys()):
+        record = station_records[station_id]
+        station_rows.append(
+            {
+                "station_id": station_id,
+                "station_name": record.get("station_name") or station_id,
+                "latitude": record.get("latitude"),
+                "longitude": record.get("longitude"),
+                "node_type": "STATION",
+            }
+        )
+
     for hub_id in sorted(hub_records.keys()):
         hub = hub_records[hub_id]
         hub_name = hub.get("station_name") or hub_id
         edges.add(((hub_id, "HUB"), (hub_id, "GROUND")))
         edges.add(((hub_id, "GROUND"), (hub_id, "HUB")))
-        grounds.append(
+        station_rows.append(
             {
                 "station_name": hub_name,
                 "station_id": hub_id,
                 "latitude": hub.get("latitude"),
                 "longitude": hub.get("longitude"),
+                "node_type": "GROUND",
             }
         )
 
@@ -380,5 +415,5 @@ if __name__ == "__main__":
     )
     lines_df.to_json("lines.jsonl", orient="records", lines=True)
 
-    stations_df = pd.DataFrame(grounds)
+    stations_df = pd.DataFrame(station_rows)
     stations_df.to_json("stations.jsonl", orient="records", lines=True)

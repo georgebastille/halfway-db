@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from national_loader import (
     StationMetadata,
@@ -25,7 +25,7 @@ from national_loader import (
 MIN_RATIO_FOR_SLOW = 0.7
 GROUND_TO_HUB_MINUTES = 2
 PLATFORM_TO_HUB_MINUTES = 2
-MAX_WAIT_MINUTES = 15
+MAX_WAIT_MINUTES = 25
 MIN_TRAVEL_MINUTES = 0.5  # guard against tiny/invalid connections
 
 
@@ -157,7 +157,9 @@ def extract_stop_events(
             continue
 
         total_points += 1
-        has_public_time = bool((loc.get("public_arrival") or loc.get("public_departure")))
+        has_public_time = bool(
+            (loc.get("public_arrival") or loc.get("public_departure"))
+        )
         if not has_public_time:
             continue
 
@@ -183,7 +185,9 @@ def extract_stop_events(
     return stops, ratio
 
 
-def compute_headways(departures: Dict[Tuple[str, str], List[float]]) -> Dict[Tuple[str, str], float]:
+def compute_headways(
+    departures: Dict[Tuple[str, str], List[float]],
+) -> Dict[Tuple[str, str], float]:
     """Determine service headway (in minutes) per station-line."""
     headways: Dict[Tuple[str, str], float] = {}
 
@@ -194,10 +198,7 @@ def compute_headways(departures: Dict[Tuple[str, str], List[float]]) -> Dict[Tup
             continue
 
         sorted_times = sorted(times)
-        diffs = [
-            b - a for a, b in zip(sorted_times, sorted_times[1:])
-            if b > a
-        ]
+        diffs = [b - a for a, b in zip(sorted_times, sorted_times[1:]) if b > a]
         # Include wrap-around to next day.
         wrap = (sorted_times[0] + 24 * 60) - sorted_times[-1]
         if wrap > 0:
@@ -278,7 +279,9 @@ def build_national_graph(
                 edge_costs[key] = travel_minutes
         for stop in stops_list:
             if stop.departure is not None:
-                departures[(stop.station_id, line_name)].append(stop.departure % (24 * 60))
+                departures[(stop.station_id, line_name)].append(
+                    stop.departure % (24 * 60)
+                )
 
         processed += 1
         if limit is not None and processed >= limit:
